@@ -14,7 +14,7 @@ from importlib.machinery import ModuleSpec
 from typing import Optional
 
 __spec__: Optional[ModuleSpec]
-logger: logging.Logger = Field(default_factory=lambda: logging.getLogger(__spec__.name if __spec__ else __name__))
+logger = logging.getLogger(__spec__.name if __spec__ else __name__)
 
 
 ## Aggregate
