@@ -78,6 +78,8 @@ class PredictService:
 
     async def _run_predictions(self):
 
+        await asyncio.sleep(10) # todo create functon in model-runner-client block until all the models are connected and ready
+
         # We provide to all the models connected historical prices
         await self._tick(self.prices_cache.get_bulk(), initial=True)
 
