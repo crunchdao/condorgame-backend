@@ -126,7 +126,7 @@ class PredictService:
         model_responses = await self._prepare_and_call_tick(prices)
         new_model_joining, model_changed_deployment = await self._update_game_models(model_responses)
 
-        if not initial and new_model_joining:
+        if not initial and (new_model_joining or model_changed_deployment):
             self.logger.debug(
                 "Call tick again to send historical prices to newly joined models (%d) and models with updated deployments (%d)",
                 len(new_model_joining),
