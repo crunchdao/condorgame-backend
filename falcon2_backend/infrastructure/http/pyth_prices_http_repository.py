@@ -4,7 +4,7 @@ from typing import Literal, get_args
 
 import requests
 
-from falcon2_backend.services.interfaces.price_repository import PriceRepository
+from falcon2_backend.services.interfaces.price_repository import PriceRepository, Prices
 
 logger = logging.getLogger()
 
@@ -161,6 +161,30 @@ class PythClient:
 class PythPriceHttpRepository(PriceRepository):
     def __init__(self):
         self.pyth_client = PythClient()
+        self.logger = logging.getLogger(__spec__.name if __spec__ else __name__)
 
-    def fetch_historical_prices(self, asset, from_: datetime, to: datetime, resolution) -> list[tuple[int, float]]:
+    def fetch_historical_prices(self, asset, from_: datetime, to: datetime, resolution) -> Prices:
+        self.logger.debug(f"Fetching historical prices with parameters: asset={asset}, from={from_}, to={to}, resolution={resolution}")
         return self.pyth_client.get_price_history(asset=asset, from_=from_, to=to, resolution=resolution)
+
+
+if __name__ == "__main__":
+    from datetime import datetime, timedelta
+
+    logging.basicConfig(level=logging.DEBUG)
+
+    repository = PythPriceHttpRepository()
+
+    # Test parameters
+    asset = "BTC"
+    now = datetime.now(timezone.utc)
+    from_date = now - timedelta(days=30)
+    to_date = now
+    resolution = "minute"
+
+    try:
+        prices = repository.fetch_historical_prices(asset, from_date, to_date, resolution)
+        logging.info(f"Fetched {len(prices)} prices for asset {asset}")
+        logging.debug(f"Prices: {prices}")
+    except Exception as e:
+        logging.error(f"An error occurred while fetching prices: {e}")

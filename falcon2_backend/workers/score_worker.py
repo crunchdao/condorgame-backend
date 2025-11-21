@@ -5,7 +5,7 @@ from sqlmodel import Session
 
 from falcon2_backend.infrastructure.db.init_db import engine
 from falcon2_backend.infrastructure.db import DbModelRepository, DbPredictionRepository, DBLeaderboardRepository
-from falcon2_backend.infrastructure.http.prices_http_repository import PythPriceHttpRepository
+from falcon2_backend.infrastructure.http import CrunchdaoPricesHttpRepository
 from falcon2_backend.services.score_service import ScoreService
 from falcon2_backend.utils.logging_config import setup_logging
 
@@ -17,7 +17,7 @@ async def main():
     session = Session(engine)
 
     model_repo = DbModelRepository(session)
-    price_repo = PythPriceHttpRepository()
+    price_repo = CrunchdaoPricesHttpRepository()
     prediction_repo = DbPredictionRepository(session)
 
     leaderboard_repo = DBLeaderboardRepository(session)

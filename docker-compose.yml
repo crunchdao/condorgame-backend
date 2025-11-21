@@ -1,6 +1,10 @@
-x-common-env: &common-env
-  env_file:
-    - ${ENV_FILE}
+x-common-env:
+  environment: &common-db-env
+    POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+    POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+    POSTGRES_USER: ${POSTGRES_USER:-falcon}
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-falcon}
+    POSTGRES_DB: ${POSTGRES_DB:-falcon2}
 
 x-common-build: &common-build
   build:
@@ -10,7 +14,8 @@ x-common-build: &common-build
 services:
   postgres:
     image: postgres:15
-    <<: *common-env
+    environment:
+      <<: *common-db-env
     container_name: falcon2-postgres
     restart: always
     ports:
@@ -25,8 +30,10 @@ services:
       - ./data/postgres_data:/var/lib/postgresql/data
     networks: [ falconnet ]
 
-  init_db:
-    <<: [ *common-env, *common-build ]
+  init-db:
+    <<: *common-build
+    environment:
+      <<: *common-db-env
     # todo improve and handle migration
     command: [ "python", "-m", "falcon2_backend.infrastructure.db.init_db" ]
     depends_on:
@@ -34,59 +41,81 @@ services:
         condition: service_healthy
     networks: [ falconnet ]
 
-  predict_worker:
-    <<: [ *common-env, *common-build ]
+  predict-worker:
+    <<: *common-build
+    environment:
+      <<: *common-db-env
+      MODEL_RUNNER_NODE_HOST: ${MODEL_RUNNER_NODE_HOST:-model-orchestrator}
+      MODEL_RUNNER_NODE_PORT: ${MODEL_RUNNER_NODE_PORT:-9091}
     restart: always
     command: [ "python", "-m", "falcon2_backend.workers.predict_worker" ]
     depends_on:
-      init_db:
+      init-db:
         condition: service_completed_successfully
+      model-orchestrator:
+        condition: service_started
     networks: [ falconnet ]
 
-  score_worker:
-    <<: [ *common-env, *common-build ]
+  score-worker:
+    <<: *common-build
+    environment:
+      <<: *common-db-env
     restart: always
     command: [ "python", "-m", "falcon2_backend.workers.score_worker" ]
     depends_on:
-      init_db:
+      init-db:
         condition: service_completed_successfully
     networks: [ falconnet ]
 
-  report_worker:
-    <<: [ *common-env, *common-build ]
+  report-worker:
+    <<: *common-build
+    environment:
+      <<: *common-db-env
     restart: always
     command: [ "python", "-m", "falcon2_backend.workers.report_worker" ]
     ports:
       - "8000:8000"
     depends_on:
-      init_db:
+      init-db:
         condition: service_completed_successfully
+    networks: [ falconnet ]
+
+
+  ## Model Nodes
+  webto3:
+    image: 728958649654.dkr.ecr.eu-west-1.amazonaws.com/webto3
+    container_name: webto3
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      SOLANA_ENV: ${SOLANA_ENV:-devnet}
+      TOURNAMENT_API_BASE_URL: ${TOURNAMENT_API_BASE_URL:-https://api.hub.crunchdao.com}
+      TOURNAMENT_API_KEY: ${TOURNAMENT_API_KEY:?error}
+    volumes:
+      - .config/solana/:/root/.config/solana/
+
     networks: [ falconnet ]
 
   model-orchestrator:
     image: 728958649654.dkr.ecr.eu-west-1.amazonaws.com/model-orchestrator
-    container_name: synth--model-orchestrator--${ENVIRONMENT_NAME:-dev}
+    container_name: model-orchestrator
     restart: unless-stopped
     init: true
     ports:
       - "9091:9091"
-      #environment:
-      #AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:?error}
-      #AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:?error}
-      #AWS_DEFAULT_REGION: ${AWS_REGION:-eu-west-1}
-      #NEW_RELIC_APP_NAME: synth--model-orchestrator--${ENVIRONMENT_NAME:-dev}
+    environment:
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:?error}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:?error}
+      AWS_DEFAULT_REGION: ${AWS_REGION:-eu-west-1}
     volumes:
       - ./data/model-orchestrator:/data/
-      - /var/run/docker.sock:/var/run/docker.sock # for local runner
-    privileged: true # for local runner
-    command:
-      - "--configuration-file"
-      - "/data/orchestrator.dev.yml"
+      - ~/.aws:/root/.aws:ro
+    command: [ "--configuration-file", "/data/orchestrator.yml" ]
     networks: [ falconnet ]
 
-  # depends_on:
-  #    web-to-3:
-  #      condition: service_health
+    depends_on:
+      - webto3
 
 networks:
   falconnet:

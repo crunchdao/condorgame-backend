@@ -180,9 +180,9 @@ class PredictService:
 
         asset_code_arg = Argument(position=1, data=Variant(type=VariantType.STRING, value=encode_data(VariantType.STRING, asset_code)))
         asset_horizon_arg = Argument(position=2, data=Variant(type=VariantType.INT, value=encode_data(VariantType.INT, horizon)))
-        asset_stop_arg = Argument(position=3, data=Variant(type=VariantType.INT, value=encode_data(VariantType.INT, step)))
+        asset_step_arg = Argument(position=3, data=Variant(type=VariantType.INT, value=encode_data(VariantType.INT, step)))
 
-        args = ([asset_code_arg, asset_horizon_arg, asset_stop_arg], [])
+        args = ([asset_code_arg, asset_horizon_arg, asset_step_arg], [])
         call_responses = await self.model_concurrent_runner.call('predict', args)
 
         predictions = {}
@@ -204,10 +204,10 @@ class PredictService:
     def _init_model_runner(self):
         self.model_concurrent_runner = DynamicSubclassModelConcurrentRunner(
             self.MODEL_RUNNER_TIMEOUT,
-            "falcon2",
+            "condorgame",
             self.MODEL_RUNNER_NODE_HOST,
             self.MODEL_RUNNER_NODE_PORT,
-            "falcon2.tracker.TrackerBase",
+            "condorgame.tracker.TrackerBase",
             max_consecutive_failures=100,
             max_consecutive_timeouts=100
         )
