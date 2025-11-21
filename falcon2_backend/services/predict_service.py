@@ -121,14 +121,20 @@ class PredictService:
 
     async def _tick(self, prices, initial=False):
         if self.logger.isEnabledFor(logging.DEBUG):
-            self.logger.debug("Tick with prices (%d values)", sum(len(v) for v in prices.values()))
+            self.logger.debug("Tick with prices (%d values) %s", sum(len(v) for v in prices.values()), "" if initial else prices)
 
         model_responses = await self._prepare_and_call_tick(prices)
-        new_model_joining = await self._update_game_models(model_responses)
+        new_model_joining, model_changed_deployment = await self._update_game_models(model_responses)
 
         if not initial and new_model_joining:
-            # TODO improve that once we have a callback from model_runner_client lib, for now just after the first tick
-            await self._prepare_and_call_tick(prices, model_runs=new_model_joining.values())
+            self.logger.debug(
+                "Call tick again to send historical prices to newly joined models (%d) and models with updated deployments (%d)",
+                len(new_model_joining),
+                len(model_changed_deployment),
+            )
+            # TODO: Improve this once we have a callback from the model_runner_client library.
+            await self._prepare_and_call_tick(self.prices_cache.get_bulk(),
+                                              model_runs=list(new_model_joining.values()) + list(model_changed_deployment.values()))
 
     async def _prepare_and_call_tick(self, prices, model_runs=None):
         prices_arg = Argument(
@@ -145,10 +151,13 @@ class PredictService:
 
     async def _update_game_models(self, model_responses):
         new_model_joining = {}
+        model_changed_deployment = {}
         for model_runner, _ in model_responses.items():
             model_id = model_runner.model_id
             if model_id in self.game_models:
                 game_model = self.game_models[model_id]
+                if game_model.deployment_changed(model_runner):
+                    model_changed_deployment[game_model.crunch_identifier] = model_runner
                 game_model.update_runner_info(model_runner)
             else:
                 game_model = Model.create(model_runner)
@@ -159,7 +168,7 @@ class PredictService:
 
             self.model_repository.save(game_model)
 
-        return new_model_joining
+        return new_model_joining, model_changed_deployment
 
     def _update_prices(self):
         prices_updated = {}
@@ -176,7 +185,6 @@ class PredictService:
             for asset, prices in prices_updated.items():
                 for ts, price in prices:
                     self.logger.debug(f"Price updated for {asset} at {datetime.fromtimestamp(ts)}: {price:.2f}")
-
 
         return prices_updated
 
@@ -199,8 +207,11 @@ class PredictService:
                 continue
 
             predictions[model_id] = Prediction.create(model_id, asset_code, horizon, step, prediction_res, now)
+        self.logger.info(f"{len(predictions)} predictions got")
 
         # All model should predict, so if it's absent => we add one typed absent
+        missing_count = len(self.game_models) - len(predictions)
+        self.logger.info(f"{missing_count} missing predictions (models sit out)")
         for _, model in self.game_models.items():
             if model.crunch_identifier not in predictions:
                 predictions[model.crunch_identifier] = Prediction.create_absent(model.crunch_identifier, asset_code, horizon, step, now)
