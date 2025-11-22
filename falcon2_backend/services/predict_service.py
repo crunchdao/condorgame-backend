@@ -4,6 +4,7 @@ import os
 import signal
 
 from model_runner_client.grpc.generated.commons_pb2 import Argument, Variant, VariantType
+from model_runner_client.model_concurrent_runners.model_concurrent_runner import ModelPredictResult
 from model_runner_client.utils.datatype_transformer import encode_data
 
 from falcon2_backend.entities.model import Model
@@ -78,8 +79,6 @@ class PredictService:
 
     async def _run_predictions(self):
 
-        await asyncio.sleep(10) # todo create functon in model-runner-client block until all the models are connected and ready
-
         # We provide to all the models connected historical prices
         await self._tick(self.prices_cache.get_bulk(), initial=True)
 
@@ -126,6 +125,17 @@ class PredictService:
             self.logger.debug("Tick with prices (%d values) %s", sum(len(v) for v in prices.values()), "" if initial else prices)
 
         model_responses = await self._prepare_and_call_tick(prices)
+
+        success, failed, timed_out = 0, 0, 0
+        for model_runner, tick_res in model_responses.items():
+            success += 1 if tick_res.status == ModelPredictResult.Status.SUCCESS else 0
+            failed += 1 if tick_res.status == ModelPredictResult.Status.FAILED else 0
+            timed_out += 1 if tick_res.status == ModelPredictResult.Status.TIMEOUT else 0
+
+        self.logger.info(f"Tick finished with {success} success, {failed} failed and {timed_out} timed out")
+
+        # maybe should we retry in the next tick the timed out or failed?
+
         new_model_joining, model_changed_deployment = await self._update_game_models(model_responses)
 
         if not initial and (new_model_joining or model_changed_deployment):
