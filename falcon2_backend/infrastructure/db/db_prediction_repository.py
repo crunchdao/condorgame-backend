@@ -216,7 +216,6 @@ class DbPredictionRepository(PredictionRepository):
                 predictions_by_model[row.model_id] = []
             predictions_by_model[row.model_id].append(row)
 
-        logging.info(f"predictions: {predictions_by_model}")
         return predictions_by_model
 
     # ------------------------------------------------------------
