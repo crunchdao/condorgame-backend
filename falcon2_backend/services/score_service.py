@@ -68,6 +68,24 @@ class ScoreService:
         for asset in self.asset_codes:
             self.prices_cache.add_prices(asset, self.prices_repository.fetch_historical_prices(asset, from_date, dt, self.PRICE_RESOLUTION))
 
+    def _update_prices(self):
+        prices_updated = {}
+        now = datetime.now(timezone.utc)
+        for asset in self.asset_codes:
+            last_price = self.prices_cache.get_last_price(asset)
+            if last_price is not None:
+                last_ts = datetime.fromtimestamp(last_price[0] + 1, tz=timezone.utc)
+                new_prices = self.prices_repository.fetch_historical_prices(asset, last_ts, now, self.PRICE_RESOLUTION)
+                self.prices_cache.add_prices(asset, new_prices)
+                prices_updated[asset] = new_prices
+
+        if self.logger.isEnabledFor(logging.DEBUG):
+            for asset, prices in prices_updated.items():
+                for ts, price in prices:
+                    self.logger.debug(f"Price updated for {asset} at {datetime.fromtimestamp(ts)}: {price:.2f}")
+
+        return prices_updated
+
     def score_predictions(self) -> bool:
         """
         Loop over cached predictions and score them using the `density_pdf` function.
@@ -150,6 +168,8 @@ class ScoreService:
 
         # for now, use SQL to optimize the model score compute
         scores = self.prediction_repository.fetch_all_windowed_scores()
+        if not scores:
+            return
 
         for score in scores:
             model = self.models[score.model_id]
@@ -172,7 +192,12 @@ class ScoreService:
             model.calc_overall_score()
 
         self.model_repository.save_all(models)
-        self.model_repository.snapshot_model_scores([ModelScoreSnapshot.create(model, dt) for model in models])
+
+        self.model_repository.snapshot_model_scores([
+            ModelScoreSnapshot.create(model, dt)
+            for model in models
+            if model.has_score()  # if the model still not have any score, no need to snapshot
+        ])
         self.model_repository.prune_snapshots()
 
     def compute_leaderboard(self):
@@ -213,6 +238,8 @@ class ScoreService:
     async def _run(self):
         force_scoring = True
         while not self.stop_event.is_set():
+            self._update_prices()
+
             if self.score_predictions() or force_scoring:
                 self.score_models()
                 self.compute_leaderboard()

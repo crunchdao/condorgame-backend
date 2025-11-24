@@ -194,7 +194,7 @@ class PredictService:
                 self.prices_cache.add_prices(asset, new_prices)
                 prices_updated[asset] = new_prices
 
-        if logger.isEnabledFor(logging.DEBUG):
+        if self.logger.isEnabledFor(logging.DEBUG):
             for asset, prices in prices_updated.items():
                 for ts, price in prices:
                     self.logger.debug(f"Price updated for {asset} at {datetime.fromtimestamp(ts)}: {price:.2f}")

@@ -28,6 +28,9 @@ class ModelScore:
     def get_ranking_value(self):
         return self.anchor
 
+    def has_score(self):
+        return self.recent is not None
+
 
 @dataclass
 class ModelScoreByParam:
@@ -81,7 +84,8 @@ class Model:
 
     def calc_overall_score(self):
         if not self.scores_by_param:
-            return None
+            self.overall_score = ModelScore(None, None, None)
+            return
 
         recent_scores = [param.score.recent for param in self.scores_by_param]
         steady_scores = [param.score.steady for param in self.scores_by_param]
@@ -95,6 +99,9 @@ class Model:
 
     def qualified_name(self):
         return f"{self.player.name}/{self.name}"
+
+    def has_score(self):
+        return self.overall_score.has_score
 
 
 @dataclass
