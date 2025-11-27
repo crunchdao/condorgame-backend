@@ -1,6 +1,6 @@
 # Condor Game Backend
 
-**Documentation:** Available in the `docs` directory (Markdown format) or accessible via **[http://localhost:8000](http://localhost:8000)** after running everything locally using `make deploy`.
+**Documentation:** Available in the `docs` directory (Markdown format) or accessible via **[http://localhost:8080](http://localhost:8080)** after running everything locally using `make deploy`.
 
 ## Deployement 
 This project supports three distinct modes of operation. Use the **Makefile** to manage and launch the application in these modes.
