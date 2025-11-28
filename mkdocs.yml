@@ -14,8 +14,6 @@ nav:
       - Introduction: INTRODUCTION.md
       - Architecture Overview: ARCHITECTURE_OVERVIEW.md
       - Running Locally: RUNNING_LOCALLY.md
-      - Build Your Challenge: BUILD_YOUR_OWN_CHALLENGE.md
-
 
   - Core Mechanics:
       - Core Concepts: CORE_CONCEPTS.md
@@ -24,6 +22,7 @@ nav:
       - Report Worker: REPORT_WORKER.md
       - Entities: ENTITIES.md
 
+  - Build Your Challenge: BUILD_YOUR_OWN_CHALLENGE.md
 
   - Operations:
       - Deployment: DEPLOYMENT.md
