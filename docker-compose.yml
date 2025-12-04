@@ -2,9 +2,9 @@ x-common-env:
   environment: &common-db-env
     POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
     POSTGRES_PORT: ${POSTGRES_PORT:-5432}
-    POSTGRES_USER: ${POSTGRES_USER:-falcon}
-    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-falcon}
-    POSTGRES_DB: ${POSTGRES_DB:-falcon2}
+    POSTGRES_USER: ${POSTGRES_USER:-condorgame}
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-condorgame}
+    POSTGRES_DB: ${POSTGRES_DB:-condorgame}
 
 x-common-build: &common-build
   build:
@@ -27,7 +27,7 @@ services:
       retries: 20
       start_period: 10s
     volumes:
-      - ./data/postgres_data:/var/lib/postgresql/data
+      - ./deployment/postgres/data:/var/lib/postgresql/data
     networks: [ condornet ]
 
   init-db:
@@ -35,7 +35,7 @@ services:
     environment:
       <<: *common-db-env
     # todo improve and handle migration
-    command: [ "python", "-m", "falcon2_backend.infrastructure.db.init_db" ]
+    command: [ "python", "-m", "condorgame_backend.infrastructure.db.init_db" ]
     depends_on:
       postgres:
         condition: service_healthy
@@ -48,7 +48,7 @@ services:
       MODEL_RUNNER_NODE_HOST: ${MODEL_RUNNER_NODE_HOST:-model-orchestrator}
       MODEL_RUNNER_NODE_PORT: ${MODEL_RUNNER_NODE_PORT:-9091}
     restart: always
-    command: [ "python", "-m", "falcon2_backend.workers.predict_worker" ]
+    command: [ "python", "-m", "condorgame_backend.workers.predict_worker" ]
     depends_on:
       init-db:
         condition: service_completed_successfully
@@ -61,7 +61,7 @@ services:
     environment:
       <<: *common-db-env
     restart: always
-    command: [ "python", "-m", "falcon2_backend.workers.score_worker" ]
+    command: [ "python", "-m", "condorgame_backend.workers.score_worker" ]
     depends_on:
       init-db:
         condition: service_completed_successfully
@@ -72,7 +72,7 @@ services:
     environment:
       <<: *common-db-env
     restart: always
-    command: [ "python", "-m", "falcon2_backend.workers.report_worker" ]
+    command: [ "python", "-m", "condorgame_backend.workers.report_worker" ]
     ports:
       - "8000:8000"
     depends_on:
@@ -104,7 +104,7 @@ services:
     ports:
       - "8080:8000"
     volumes:
-      - ./:/docs/
+      - ${PROJECT_DIR:-./}:/docs/
 
 
 networks:

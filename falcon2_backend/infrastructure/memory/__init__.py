@@ -1,2 +1,0 @@
-from .in_memory_prediction_storage import InMemoryPredictionRepository
-from .in_memory_model_repository import InMemoryModelRepository

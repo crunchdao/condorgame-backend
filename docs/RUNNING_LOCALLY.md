@@ -84,7 +84,7 @@ make build     # rebuild Docker images
 
 In local or development mode, the orchestrator runs through:
 ```
-deployment/local/model-orchestrator/config/docker-entrypoint.sh
+deployment/model-orchestrator-local/config/docker-entrypoint.sh
 ```
 
 This provides flexibility for automation, such as rebuilding runner images or applying custom logic before the orchestrator starts.
@@ -98,7 +98,7 @@ The orchestrator can load **local models** directly from the `submissions` direc
 
 This compose file launches the model orchestrator in **development mode**, loading its configuration from:
 ```
-deployment/local/model-orchestrator/config/orchestrator.dev.yml
+deployment/model-orchestrator-local/config/orchestrator.dev.yml
 ```
 
 In this mode, the orchestrator will:
@@ -108,7 +108,7 @@ In this mode, the orchestrator will:
 
 2. Scan the `submissions` directory :  
       ```
-         deployment/local/model-orchestrator/data/submissions/
+         deployment/model-orchestrator-local/data/submissions/
       ```
 3. For each model configured directory found, it will:  
       - detect file changes  

@@ -7,8 +7,8 @@ services:
     environment:
       DOCKER_NETWORK_NAME: ${MODEL_ORCHESTRATOR_NETWORK-condornet}
     volumes:
-      - ./deployment/local/model-orchestrator/data/:/app/data/
-      - ./deployment/local/model-orchestrator/config/:/app/config/
+      - ./deployment/model-orchestrator-local/data/:/app/data/
+      - ./deployment/model-orchestrator-local/config/:/app/config/
       - /var/run/docker.sock:/var/run/docker.sock # for local runner
     privileged: true # for local runner
     entrypoint: [ "/app/config/docker-entrypoint.sh" ]

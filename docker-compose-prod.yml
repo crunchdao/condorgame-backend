@@ -1,4 +1,4 @@
-## Will deploy the models local in your infrastructure.
+## As Coordinator, you are not responsible for deploying this file. Deployment is handled by CrunchdDao.
 
 services:
 
@@ -13,7 +13,7 @@ services:
       TOURNAMENT_API_BASE_URL: ${TOURNAMENT_API_BASE_URL:-https://api.hub.crunchdao.com}
       TOURNAMENT_API_KEY: ${TOURNAMENT_API_KEY:?error}
     volumes:
-      - .config/solana/:/root/.config/solana/
+      - ./deployment/.config/solana/:/root/.config/solana/
 
   model-orchestrator:
     build:
@@ -23,8 +23,8 @@ services:
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:?error}
       AWS_DEFAULT_REGION: ${AWS_REGION:-eu-west-1}
     volumes:
-      - ./data/model-orchestrator:/data/
-      - ~/.aws:/root/.aws:ro
-    command: [ "--configuration-file", "/data/orchestrator.yml" ]
+      - ./deployment/model-orchestrator/data:/app/data
+      - ./deployment/model-orchestrator/config/:/app/config/
+    command: [ "--configuration-file", "/app/config/orchestrator.yml" ]
     depends_on:
       - webto3

@@ -16,7 +16,7 @@ ENV VIRTUAL_ENV=/app/.venv
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # Copy the application code
-COPY falcon2_backend ./falcon2_backend
+COPY condorgame_backend ./condorgame_backend
 
 # Default command — overridden in docker compose for each worker
-CMD ["python", "-m", "falcon2_backend"]
+CMD ["python", "-m", "condorgame_backend"]
