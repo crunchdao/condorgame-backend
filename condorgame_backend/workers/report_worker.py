@@ -95,11 +95,6 @@ class PredictionScoreResponse(BaseModel):
     performed_at: datetime
 
 
-class MetricsReportArgs(BaseModel):
-    model_ids: List[str] = Query(..., alias="projectIds")
-    start: datetime
-    end: datetime
-
 
 # ------------------------------------------------------------------------------
 # Routes
@@ -132,14 +127,16 @@ def get_leaderboard(
 
 @app.get("/reports/models/global", response_model=List[GlobalMetricsResponse])
 def get_models_global(
-    filter_query: Annotated[MetricsReportArgs, Query()],
+    model_ids: Annotated[list[str], Query(..., alias="projectIds")],
+    start: Annotated[datetime, Query(...)],
+    end: Annotated[datetime, Query(...)],
     model_repo: Annotated[ModelRepository, Depends(get_model_repository)],
 ):
     """
     All models global metrics.
     (Filtering ignored for now — apply it when repository supports it)
     """
-    model_score_snapshots = model_repo.fetch_model_score_snapshots(model_ids=filter_query.model_ids, _from=filter_query.start, to=filter_query.end)
+    model_score_snapshots = model_repo.fetch_model_score_snapshots(model_ids=model_ids, _from=start, to=end)
 
     return [
         GlobalMetricsResponse(
@@ -156,13 +153,15 @@ def get_models_global(
 
 @app.get("/reports/models/params", response_model=List[ParamMetricsResponse])
 def get_models_params(
-    filter_query: Annotated[MetricsReportArgs, Query()],
+    model_ids: Annotated[list[str], Query(..., alias="projectIds")],
+    start: Annotated[datetime, Query(...)],
+    end: Annotated[datetime, Query(...)],
     model_repo: Annotated[ModelRepository, Depends(get_model_repository)],
 ):
     """
     Detailed parameters metrics for each model.
     """
-    model_score_snapshots = model_repo.fetch_model_score_snapshots(model_ids=filter_query.model_ids, _from=filter_query.start, to=filter_query.end)
+    model_score_snapshots = model_repo.fetch_model_score_snapshots(model_ids=model_ids, _from=start, to=end)
 
     return [
         ParamMetricsResponse(
@@ -184,20 +183,25 @@ def get_models_params(
 
 @app.get("/reports/predictions", response_model=List[PredictionScoreResponse])
 def get_models_params(
-    filter_query: Annotated[MetricsReportArgs, Query()],
-    prediction_repo: Annotated[PredictionRepository, Depends(get_prediction_repository)],
+    model_ids: Annotated[list[str], Query(..., alias="projectIds")],
+    start: Annotated[datetime, Query(...)],
+    end: Annotated[datetime, Query(...)],
+    prediction_repo: Annotated[
+        PredictionRepository,
+        Depends(get_prediction_repository)
+    ],
 ):
     """
     Detailed parameters metrics for each model.
     """
 
-    if len(filter_query.model_ids) > 1:
+    if len(model_ids) > 1:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Service is available only for one model at a time. Please provide a single model_id."
         )
 
-    predictions_scored = prediction_repo.query_scores(model_ids=filter_query.model_ids, _from=filter_query.start, to=filter_query.end)
+    predictions_scored = prediction_repo.query_scores(model_ids=model_ids, _from=start, to=end)
 
     return [
         PredictionScoreResponse(
