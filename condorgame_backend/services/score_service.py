@@ -25,6 +25,55 @@ __spec__: Optional[ModuleSpec]
 
 MINUTE = 60
 
+# ------------------------------------------------------------------
+# CRPS integration bounds configuration
+#
+# crps_bounds["t"][asset] defines the BASE integration half-width
+# used when computing the CRPS integral:
+#
+#     CRPS = ∫ (F(z) - 1[z ≥ x])² dz ,  z ∈ [t_min, t_max]
+#
+# This value represents a reference maximum price-move scale for the
+# asset at the given horizon. It is a truncation range ensuring
+# enough mass is covered for meaningful CRPS evaluation.
+CRPS_BOUNDS = {
+    "base_step": 300,
+    "t":{
+        "BTC": 1500,
+        "SOL": 4,
+        "ETH": 80,
+        "XAU": 28,
+    }
+}
+# ------------------------------------------------------------------
+
+
+def crps_integral(density_dict, x, t_min=-4000, t_max=4000, num_points=2000):
+    """
+    CRPS score (Integrated Quadratic Score) using:
+    - single PDF evaluation per grid point
+    - cumulative sum to get CDF
+
+    CRPS quantifies the accuracy of probabilistic forecasts by measuring the squared distance 
+    between the forecast CDF and the observed indicator function.
+    """
+    ts = np.linspace(t_min, t_max, num_points)
+    dt = ts[1] - ts[0]
+
+    # Vectorized PDF computation
+    pdfs = np.array([density_pdf(density_dict, t) for t in ts], dtype=float)
+
+    # Build CDF by cumulative integration
+    cdfs = np.cumsum(pdfs) * dt
+    cdfs = np.clip(cdfs, 0.0, 1.0)
+
+    # Indicator
+    indicators = (ts >= x).astype(float)
+
+    # Integrate squared error
+    integrand = (cdfs - indicators)**2
+    return float(np.trapz(integrand, ts))
+
 
 class ScoreService:
     PRICES_HISTORY_PERIOD = timedelta(days=7)  # Cache period for predictions
@@ -124,45 +173,89 @@ class ScoreService:
         return True
 
     def score_prediction(self, prediction: Prediction):
-        densities = []
-        step = prediction.params.step
+        total_score = 0.0
+        # step = prediction.params.step
         ts = prediction.resolvable_at.timestamp()
         asset = prediction.params.asset
+
+        # TODO: Add step_config as a params of prediction instead of step
+        STEP_CONFIG = {
+            "5min":   300,
+            "1hour":  300*12,
+            "6hour":  300*12*6,
+            "24hour": 300*12*24
+        }
 
         if prediction.status != PredictionStatus.SUCCESS:
             return PredictionScore(None, False, f"The prediction not succeed {prediction.status}")
 
-        if len(prediction.distributions) != prediction.params.horizon / step:
-            return PredictionScore(None, False, "The prediction does not have the correct number of steps")
+        # if len(prediction.distributions) != prediction.params.horizon / step:
+        #     return PredictionScore(None, False, "The prediction does not have the correct number of steps")
+        
+        for name, step in STEP_CONFIG.items():
+            if step > prediction.params.horizon:
+                continue
+            expected_len = prediction.params.horizon // step
+            if name not in prediction.distributions:
+                return PredictionScore(None, False, "The prediction does not have the correct steps configuration")
+            if len(prediction.distributions[name]) != expected_len:
+                return PredictionScore(None, False, "The prediction does not have the correct number of steps")
+            
         try:
-            for density_prediction in prediction.distributions[::-1]:
-                current_price_data = self.prices_cache.get_closest_price(asset, ts)
-                previous_price_data = self.prices_cache.get_closest_price(asset, ts - step)
+            # Score predictions at each temporal resolution independently
+            for name, step in STEP_CONFIG.items():
 
-                if not current_price_data or not previous_price_data:
-                    self.logger.warning(f"No price data found for {asset} at {ts} or {ts - step}. Skipping density scoring.")
-                    continue
+                density_prediction = prediction.distributions[name]
 
-                ts_current, price_current = current_price_data
-                ts_prev, price_prev = previous_price_data
+                # Get timestamp of the first prediction step
+                ts_rolling = ts - step * (len(density_prediction) - 1)
 
-                if ts_current != ts_prev:
-                    delta_price = np.log(price_current) - np.log(price_prev)
-                    pdf_value = density_pdf(density_dict=density_prediction, x=delta_price)
-                    densities.append(pdf_value)
+                scores_step = []
 
-                ts -= step
+                for i in range(len(density_prediction)):
+
+                    current_price_data  = self.tracker.prices.get_closest_price(asset, ts_rolling)
+                    previous_price_data = self.tracker.prices.get_closest_price(asset, ts_rolling - step)
+
+                    ts_rolling += step
+
+                    if not current_price_data or not previous_price_data:
+                        self.logger.warning(f"No price data found for {asset} at {ts} or {ts - step}. Skipping density scoring.")
+                        continue
+
+                    ts_current, price_current = current_price_data
+                    ts_prev, price_prev = previous_price_data
+
+                    if ts_current != ts_prev:
+                        delta = (price_current - price_prev)
+
+                        # Step-dependent scaling coefficient for CRPS bounds
+                        K = np.sqrt(step / CRPS_BOUNDS["base_step"]) if step > CRPS_BOUNDS["base_step"] else 1
+
+                        crps_value = crps_integral(
+                            density_dict=density_prediction[i],
+                            x=delta,
+                            t_min=-K * CRPS_BOUNDS["t"][asset],
+                            t_max= K * CRPS_BOUNDS["t"][asset],
+                        )
+                        scores_step.append(crps_value)
+
+                total_score += np.sum(scores_step)
+
+            # Normalize by asset-specific scale (keep scores comparable across asset)
+            total_score = total_score / CRPS_BOUNDS["t"][asset]
+
         except Exception as e:
             tb = traceback.format_exc()
             self.logger.debug(f"Error during scoring: {e}\nTraceback:\n{tb}")
             return PredictionScore(None, False, f"Error during scoring: {e}\nTraceback:\n{tb}")
 
-        score = numpy.mean(densities)
-
-        if not math.isfinite(score):
+        if not math.isfinite(total_score):
             return PredictionScore(None, False, "The final score is invalid => math.isfinite return True.")
+        
+        # TODO: CRPS score: lower is better
 
-        return PredictionScore(float(score), True, None)
+        return PredictionScore(float(total_score), True, None)
 
     def score_models(self):
 
