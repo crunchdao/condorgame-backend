@@ -14,16 +14,23 @@ services:
     ports:
       - "8001:8001"
     privileged: true # for local runner
-    entrypoint: [ "/app/config/docker-entrypoint.sh" ]
-    command: [ "model-orchestrator", "dev", "--configuration-file", "/app/config/orchestrator.dev.yml", "--rebuild", "if-code-modified"]
+    entrypoint: ["/app/config/docker-entrypoint.sh"]
+    command:
+      [
+        "model-orchestrator",
+        "dev",
+        "--configuration-file",
+        "/app/config/orchestrator.dev.yml",
+        "--rebuild",
+        "if-code-modified",
+      ]
 
   report-ui:
     build:
       context: https://github.com/crunchdao/coordinator-webapp.git#feat/models
       args:
         NEXT_PUBLIC_API_URL: "http://report-worker:8000"
-        #NEXT_PUBLIC_API_URL_MODEL_ORCHESTRATOR: "http://model-orchestrator:8001"
-        NEXT_PUBLIC_API_URL_MODEL_ORCHESTRATOR: "http://localhost:8001"
+        NEXT_PUBLIC_API_URL_MODEL_ORCHESTRATOR: "http://model-orchestrator:8001"
     container_name: report-ui
     ports:
       - "3000:3000"
@@ -32,5 +39,4 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - report-worker
-    networks: [ condornet ]
-
+    networks: [condornet]
