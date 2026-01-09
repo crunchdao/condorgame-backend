@@ -11,7 +11,9 @@ from pydantic import Field
 from datetime import datetime, timezone, timedelta
 
 from importlib.machinery import ModuleSpec
-from typing import Optional
+from typing import Optional, Sequence
+
+from condorgame_backend.utils.times import format_seconds, DAY, HOUR, MINUTE
 
 __spec__: Optional[ModuleSpec]
 logger = logging.getLogger(__spec__.name if __spec__ else __name__)
@@ -25,18 +27,34 @@ class PredictionStatus(Enum):
     ABSENT = "ABSENT"
 
 
-@dataclass
+@dataclass(frozen=True)
 class PredictionParams:
     asset: str
     horizon: int
-    step: int
+    steps: tuple[int, ...]
+
+    def __init__(self, asset: str, horizon: int, steps: Sequence[int]):
+        object.__setattr__(self, "asset", asset)
+        object.__setattr__(self, "horizon", horizon)
+        object.__setattr__(self, "steps", tuple(steps))
+
+    @staticmethod
+    def label(asset: str, horizon: int, steps: Sequence[int]) -> str:
+        return (
+            f"{asset:<4} • {format_seconds(horizon):<3} • steps: "
+            f"{', '.join(format_seconds(s) for s in steps)}"
+        )
+
+    def __str__(self) -> str:
+        return self.label(self.asset, self.horizon, self.steps)
 
 
 @dataclass
 class PredictionScore:
-    value: float | None
+    raw: float | None
     success: bool
     failed_reason: str | None
+    final: float | None = None
     scored_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -47,7 +65,7 @@ class Prediction:
     params: PredictionParams
     status: PredictionStatus
     exec_time: float  # how long was the prediction
-    distributions: list[dict] | None
+    distributions: dict | None
     performed_at: datetime  # time of predict call
     resolvable_at: datetime  # time when the prediction is ready to be scored
     score: PredictionScore | None = None
@@ -57,12 +75,12 @@ class Prediction:
         return f"PRE_{model_id}_{performed_at.strftime('%Y%m%d_%H%M%S.%f')[:-3]}"
 
     @staticmethod
-    def create(model_id: str, asset: str, horizon: int, step: int, model_result: ModelPredictResult, performed_at: datetime):
+    def create(model_id: str, asset: str, horizon: int, steps: Sequence[int], model_result: ModelPredictResult, performed_at: datetime):
         return Prediction(
 
             id=Prediction.generate_id(model_id, performed_at),
             model_id=model_id,
-            params=PredictionParams(asset, horizon, step),
+            params=PredictionParams(asset, horizon, steps),
             status=PredictionStatus(model_result.status.value),
             exec_time=model_result.exec_time_us,
             distributions=model_result.result,
@@ -71,11 +89,11 @@ class Prediction:
         )
 
     @staticmethod
-    def create_absent(model_id: str, asset: str, horizon: int, step: int, performed_at: datetime):
+    def create_absent(model_id: str, asset: str, horizon: int, steps: Sequence[int], performed_at: datetime):
         return Prediction(
             id=Prediction.generate_id(model_id, performed_at),
             model_id=model_id,
-            params=PredictionParams(asset, horizon, step),
+            params=PredictionParams(asset, horizon, steps),
             status=PredictionStatus.ABSENT,
             exec_time=0.0,
             distributions=None,
@@ -106,11 +124,16 @@ class PredictionConfig:
 @dataclass
 class GroupScheduler:
     horizon: int
-    step: int
+    steps: Sequence[int]
     prediction_interval: int
     assets: list[str]
     index: int = 0
     next_run: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def update_next_run(self, last_run_time: datetime, asset: str) -> None:
+        asset_index = self.assets.index(asset)
+        self.next_run = last_run_time + timedelta(seconds=self.prediction_interval / len(self.assets))
+        self.index = (asset_index + 1) % len(self.assets)
 
     def should_run(self, now: datetime) -> bool:
         return now >= self.next_run
@@ -120,7 +143,7 @@ class GroupScheduler:
         self.index = (self.index + 1) % len(self.assets)
         self.next_run = now + timedelta(seconds=self.prediction_interval / len(self.assets))
 
-        logger.debug(f"Next Run: {self.next_run.strftime("%H:%M:%S")}, Code: {self.assets[self.index]}, Horizon: {int(self.horizon / 60)}m, Step: {int(self.step / 60)}m")
+        logger.debug(f"Next Run: {self.next_run.strftime("%H:%M:%S")}, Params: [{PredictionParams.label(code, self.horizon, self.steps)}]")
 
         return code
 
@@ -130,7 +153,7 @@ class GroupScheduler:
         return [
             GroupScheduler(
                 horizon=h,
-                step=s,
+                steps=s,
                 prediction_interval=pi,
                 assets=codes,
             )
@@ -142,6 +165,6 @@ class GroupScheduler:
         groups = defaultdict(list)
         for cfg in configs:
             params = cfg.prediction_params
-            key = (params.horizon, params.step, cfg.prediction_interval)
+            key = (params.horizon, params.steps, cfg.prediction_interval)
             groups[key].append(params.asset)
         return groups

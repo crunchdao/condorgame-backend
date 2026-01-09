@@ -69,6 +69,7 @@ class DbModelRepository(ModelRepository):
             # Update existing
             existing.name = row.name
             existing.deployment_identifier = row.deployment_identifier
+            existing.runner_id = row.runner_id
             existing.player_crunch_identifier = row.player_crunch_identifier
             existing.player_name = row.player_name
             existing.overall_score_recent = row.overall_score_recent
@@ -149,6 +150,7 @@ class DbModelRepository(ModelRepository):
             player=player,
             name=row.name,
             deployment_identifier=row.deployment_identifier,
+            runner_id=row.runner_id
         )
 
         # --- Overall score ---
@@ -184,6 +186,7 @@ class DbModelRepository(ModelRepository):
             crunch_identifier=model.crunch_identifier,
             name=model.name,
             deployment_identifier=model.deployment_identifier,
+            runner_id=model.runner_id,
             player_crunch_identifier=model.player.crunch_identifier,
             player_name=model.player.name,
             overall_score_recent=model.overall_score.recent if model.overall_score else None,

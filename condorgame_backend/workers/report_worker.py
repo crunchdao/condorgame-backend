@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from sqlmodel import Session
 
+from condorgame_backend.entities.prediction import PredictionParams
 from condorgame_backend.infrastructure.db import DbModelRepository, DBLeaderboardRepository, DbPredictionRepository
 from condorgame_backend.infrastructure.db.init_db import engine, init_db
 from condorgame_backend.services.interfaces.leaderboard_repository import LeaderboardRepository
@@ -85,7 +86,7 @@ class ParamMetricsResponse(BaseModel):
     param: str
     asset: str
     horizon: int
-    step: int
+    steps: tuple[int,...]
     score_recent: Optional[float]
     score_steady: Optional[float]
     score_anchor: Optional[float]
@@ -97,8 +98,9 @@ class PredictionScoreResponse(BaseModel):
     param: str
     asset: str
     horizon: int
-    step: int
-    score_value: Optional[float]
+    steps: tuple[int,...]
+    score_raw_value: Optional[float]
+    score_final_value: Optional[float]
     score_failed: bool
     score_failed_reason: Optional[str]
     scored_at: datetime
@@ -146,9 +148,9 @@ def get_leaderboard(
         LeaderboardEntryResponse(
             created_at=leaderboard.created_at,
             model_id=entry.model_id,
-            score_recent=entry.score.recent,
-            score_steady=entry.score.steady,
-            score_anchor=entry.score.anchor,
+            score_recent=entry.score.recent if entry.score else None,
+            score_steady=entry.score.steady if entry.score else None,
+            score_anchor=entry.score.anchor if entry.score else None,
             rank=entry.rank,
             model_name=entry.model_name,
             cruncher_name=entry.player_name
@@ -198,10 +200,10 @@ def get_models_params(
     return [
         ParamMetricsResponse(
             model_id=score_snapshot.model_id,
-            param=f"{sbp.param.asset}-{sbp.param.horizon}-{sbp.param.step}",
+            param=PredictionParams.label(sbp.param.asset, sbp.param.horizon, sbp.param.steps),
             asset=sbp.param.asset,
             horizon=sbp.param.horizon,
-            step=sbp.param.step,
+            steps=sbp.param.steps,
             score_recent=sbp.score.recent,
             score_steady=sbp.score.steady,
             score_anchor=sbp.score.anchor,
@@ -238,11 +240,12 @@ def get_models_params(
     return [
         PredictionScoreResponse(
             model_id=prediction.model_id,
-            param=f"{prediction.asset}-{prediction.horizon}-{prediction.step}",
+            param=PredictionParams.label(prediction.asset, prediction.horizon, prediction.steps),
             asset=prediction.asset,
             horizon=prediction.horizon,
-            step=prediction.step,
-            score_value=prediction.score_value,
+            steps=tuple(prediction.steps),
+            score_final_value=prediction.score_final_value,
+            score_raw_value=prediction.score_raw_value,
             score_failed=not prediction.score_success,
             score_failed_reason=prediction.score_failed_reason,
             scored_at=prediction.score_scored_at,

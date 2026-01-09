@@ -6,9 +6,10 @@ import signal
 from model_runner_client.grpc.generated.commons_pb2 import Argument, Variant, VariantType
 from model_runner_client.model_concurrent_runners.model_concurrent_runner import ModelPredictResult
 from model_runner_client.utils.datatype_transformer import encode_data
+from numpy.random.mtrand import Sequence
 
 from condorgame_backend.entities.model import Model
-from condorgame_backend.entities.prediction import Prediction, GroupScheduler, PredictionConfig, logger
+from condorgame_backend.entities.prediction import Prediction, GroupScheduler, PredictionConfig, logger, PredictionParams
 from condorgame_backend.infrastructure.memory.prices_cache import PriceStore
 from condorgame_backend.services.interfaces.model_repository import ModelRepository
 from condorgame_backend.services.interfaces.prediction_repository import PredictionRepository
@@ -30,9 +31,11 @@ class PredictService:
     PRICES_HISTORY_PERIOD = timedelta(days=30)
     PRICE_RESOLUTION = "minute"
 
-    MODEL_RUNNER_TIMEOUT = 60
+    MODEL_RUNNER_TIMEOUT = 40
     MODEL_RUNNER_NODE_HOST = os.getenv("MODEL_RUNNER_NODE_HOST", 'localhost')
     MODEL_RUNNER_NODE_PORT = os.getenv("MODEL_RUNNER_NODE_PORT", 9091)
+
+    TICK_TIMEOUT = 1
 
     def __init__(self,
                  prices_repository: PriceRepository,
@@ -89,13 +92,17 @@ class PredictService:
             if prices and any(prices.values()):
                 await self._tick(prices)
 
+            next_predict_time = datetime.max.replace(tzinfo=timezone.utc)
             for scheduler in self.asset_group_schedulers:
                 if scheduler.should_run(now):
-                    await self._predict(scheduler.next_code(now), scheduler.horizon, scheduler.step)
+                    await self._predict(scheduler.next_code(now), scheduler.horizon, scheduler.steps)
+                next_predict_time = min(next_predict_time, scheduler.next_run)
 
             end_time = datetime.now(timezone.utc)
+            next_predict_in_seconds = (next_predict_time - end_time).total_seconds()
 
-            sleep_duration = max(self.PRICE_FREQUENCY - (end_time - now).total_seconds(), 0)
+            # Sleep only if the next prediction is not overdue or if the current iteration duration is less than PRICE_FREQUENCY
+            sleep_duration = min(next_predict_in_seconds, max(self.PRICE_FREQUENCY - (end_time - now).total_seconds(), 0))
             try:
                 self.logger.debug(f"Sleeping for {int(sleep_duration)} seconds")
                 await asyncio.wait_for(self.stop_predicting_event.wait(), timeout=sleep_duration)
@@ -150,7 +157,7 @@ class PredictService:
 
         args = ([prices_arg], [])
 
-        model_responses = await self.model_concurrent_runner.call("tick", args, model_runs=model_runs)
+        model_responses = await self.model_concurrent_runner.call("tick", args, model_runs=model_runs, timeout=self.TICK_TIMEOUT)
 
         success, failed, timed_out = 0, 0, 0
         for model_runner, tick_res in model_responses.items():
@@ -169,7 +176,7 @@ class PredictService:
             model_id = model_runner.model_id
             if model_id in self.game_models:
                 game_model = self.game_models[model_id]
-                if game_model.deployment_changed(model_runner):
+                if game_model.deployment_changed(model_runner) or game_model.runner_changed(model_runner):
                     model_changed_deployment[game_model.crunch_identifier] = model_runner
                 game_model.update_runner_info(model_runner)
             else:
@@ -201,16 +208,16 @@ class PredictService:
 
         return prices_updated
 
-    async def _predict(self, asset_code: str, horizon: int, step: int):
-        self.logger.info(f"Predicting [{asset_code}] for {horizon}s and {step}s")
-        now = datetime.now(timezone.utc)
+    async def _predict(self, asset_code: str, horizon: int, steps: Sequence[int]):
+        self.logger.info(f"Predicting [{PredictionParams.label(asset_code, horizon, steps)}]")
+        prediction_dt = datetime.now(timezone.utc)
 
         asset_code_arg = Argument(position=1, data=Variant(type=VariantType.STRING, value=encode_data(VariantType.STRING, asset_code)))
         asset_horizon_arg = Argument(position=2, data=Variant(type=VariantType.INT, value=encode_data(VariantType.INT, horizon)))
-        asset_step_arg = Argument(position=3, data=Variant(type=VariantType.INT, value=encode_data(VariantType.INT, step)))
+        asset_steps_arg = Argument(position=3, data=Variant(type=VariantType.JSON, value=encode_data(VariantType.JSON, list(steps))))
 
-        args = ([asset_code_arg, asset_horizon_arg, asset_step_arg], [])
-        call_responses = await self.model_concurrent_runner.call('predict', args)
+        args = ([asset_code_arg, asset_horizon_arg, asset_steps_arg], [])
+        call_responses = await self.model_concurrent_runner.call('predict_all', args)
 
         predictions = {}
         for model_run, prediction_res in call_responses.items():
@@ -219,7 +226,7 @@ class PredictService:
                 self.logger.debug(f"Model {model_run.model_id}, {model_run.model_name} joined the game after the previous tick, we ignore his prediction")
                 continue
 
-            predictions[model_id] = Prediction.create(model_id, asset_code, horizon, step, prediction_res, now)
+            predictions[model_id] = Prediction.create(model_id, asset_code, horizon, steps, prediction_res, prediction_dt)
         self.logger.info(f"{len(predictions)} predictions got")
 
         # All model should predict, so if it's absent => we add one typed absent
@@ -227,7 +234,7 @@ class PredictService:
         self.logger.info(f"{missing_count} missing predictions (models sit out)")
         for _, model in self.game_models.items():
             if model.crunch_identifier not in predictions:
-                predictions[model.crunch_identifier] = Prediction.create_absent(model.crunch_identifier, asset_code, horizon, step, now)
+                predictions[model.crunch_identifier] = Prediction.create_absent(model.crunch_identifier, asset_code, horizon, steps, prediction_dt)
 
         self.prediction_repository.save_all(predictions.values())
 
