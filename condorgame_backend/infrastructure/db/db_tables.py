@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlmodel import SQLModel, Field, Index, Column, JSON
+from sqlmodel import SQLModel, Field, Index, Column, JSON, ARRAY, Integer
 
 
 class ModelRow(SQLModel, table=True):
@@ -14,6 +14,7 @@ class ModelRow(SQLModel, table=True):
     deployment_identifier: str
     player_crunch_identifier: str
     player_name: str
+    runner_id: str
     overall_score_recent: Optional[float] = None
     overall_score_steady: Optional[float] = None
     overall_score_anchor: Optional[float] = None
@@ -40,6 +41,7 @@ class ModelScoreSnapshotRow(SQLModel, table=True):
     model_id: str = Field(index=True, foreign_key="models.crunch_identifier")
     performed_at: datetime = Field(index=True)
 
+
 class LeaderboardRow(SQLModel, table=True):
     __tablename__ = "leaderboards"
 
@@ -58,12 +60,15 @@ class PredictionRow(SQLModel, table=True):
     model_id: str = Field(index=True, foreign_key="models.crunch_identifier")
     asset: str = Field(index=True)
     horizon: int
-    step: int
+    steps: tuple[int,...] = Field(
+        default_factory=list,
+        sa_column=Column(ARRAY(Integer), nullable=False),
+    )
     status: str = Field(index=True)
     exec_time: float
 
     # JSON-serialized list[dict]
-    distributions: Optional[list[dict]] = Field(
+    distributions: Optional[dict] = Field(
         default=None,
         sa_column=Column(JSON)
     )
@@ -71,13 +76,14 @@ class PredictionRow(SQLModel, table=True):
     performed_at: datetime = Field(index=True)
     resolvable_at: datetime = Field(index=True)
 
-    score_value: Optional[float] = None
+    score_raw_value: Optional[float] = None
+    score_final_value: Optional[float] = None
     score_success: Optional[bool] = None
     score_failed_reason: Optional[str] = None
     score_scored_at: Optional[datetime] = Field(default=None, index=True)
 
     __table_args__ = (
-        Index("idx_model_asset_horizon_step", "model_id", "asset", "horizon", "step"),
+        Index("idx_model_asset_horizon_steps", "model_id", "asset", "horizon", "steps"),
     )
 
 
@@ -87,7 +93,10 @@ class PredictionConfigRow(SQLModel, table=True):
     id: str = Field(primary_key=True)
     asset: str = Field(index=True)
     horizon: int
-    step: int
+    steps: tuple[int,...] = Field(
+        default_factory=list,
+        sa_column=Column(ARRAY(Integer), nullable=False),
+    )
     prediction_interval: int
     active: bool = Field(index=True)
     order: int

@@ -11,7 +11,7 @@ class WindowedScoreRow:
     model_id: str
     asset: str
     horizon: int
-    step: int
+    steps: tuple[int,...]
     count: int
     recent_mean: float
     steady_mean: float
@@ -48,7 +48,7 @@ class PredictionRepository(ABC):
                        "model_id": str,
                        "asset": str,
                        "horizon": int,
-                       "step": int,
+                       "steps": tuple[int,...],
                        "count": int,
                        "mean": float,
                    }
