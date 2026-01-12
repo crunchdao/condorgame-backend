@@ -46,13 +46,13 @@ CRPS_BOUNDS = {
     }
 }
 
-
 # ------------------------------------------------------------------
 # NumPy 2.0 removed np.trapz → replaced by np.trapezoid
 if hasattr(np, "trapezoid"):
     trapezoid = np.trapezoid
 else:
     trapezoid = np.trapz
+
 
 def crps_integral(density_dict, x, t_min=-4000, t_max=4000, num_points=256):
     """
@@ -109,8 +109,6 @@ class ScoreService:
         self.logger = logging.getLogger(__spec__.name if __spec__ else __name__)
 
         self.asset_codes = PredictionConfig.get_active_assets(self.prediction_repository.fetch_active_configs())
-        self.models = self.model_repository.fetch_all()
-
         self.stop_event = asyncio.Event()
 
         self._init_prices_cache()
@@ -140,6 +138,9 @@ class ScoreService:
                     self.logger.debug(f"Price updated for {asset} at {datetime.fromtimestamp(ts)}: {price:.2f}")
 
         return prices_updated
+
+    def _refresh_models(self):
+        self.models = self.model_repository.fetch_all()
 
     def score_predictions(self) -> bool:
         """
@@ -366,6 +367,8 @@ class ScoreService:
         force_scoring = True
         while not self.stop_event.is_set():
             now = datetime.now(timezone.utc)
+            # Fetch updated models to ensure the leaderboard contains new models joined since the last execution
+            self._refresh_models()
             self._update_prices()
 
             if self.score_predictions() or force_scoring:
