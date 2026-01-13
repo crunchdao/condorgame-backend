@@ -242,7 +242,10 @@ class GroupScheduler:
 
         next_asset = min(self.assets, key=lambda a: self.last_exec_ts.get(a, float("-inf")))
         self.index = self.assets.index(next_asset)
-        self.next_run = datetime.fromtimestamp(self.last_exec_ts[next_asset], timezone.utc) + timedelta(seconds=self.prediction_interval)
+        if next_asset not in self.last_exec_ts:
+            self.next_run = datetime.now(timezone.utc)
+        else:
+            self.next_run = datetime.fromtimestamp(self.last_exec_ts[next_asset], timezone.utc) + timedelta(seconds=self.prediction_interval)
 
     def _advance_schedule(self, dt: datetime) -> None:
         self.index = (self.index + 1) % len(self.assets)
@@ -258,6 +261,8 @@ class GroupScheduler:
             else:
                 # not late = > don't run before the normal flow
                 dt_next_run = max(dt_next_run, last_exec_dt + self._per_asset_delta)
+        else:
+            dt_next_run = dt
 
         self.next_run = dt_next_run
 

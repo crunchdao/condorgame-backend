@@ -22,14 +22,6 @@ def test_group_scheduler_round_robin_basic():
     assert params.asset == "BTC"
     scheduler.mark_executed("BTC", now)
 
-    # Not due yet => no params returned
-    params = scheduler.next(now)
-    assert params is None
-
-    assert scheduler.index == 1
-    assert scheduler.next_run == now + timedelta(minutes=20)
-
-
 def test_group_scheduler_skip_when_no_new_prices():
     """
     ensures an asset is skipped when the latest market info is not newer than its last execution time.
@@ -62,6 +54,43 @@ def test_group_scheduler_skip_when_no_new_prices():
 
     # After skip, it should advance to the next asset
     assert scheduler.index == scheduler.assets.index("ETH")
+
+
+
+def test_group_scheduler_recover_picks_lru_first_absent():
+    """
+    after restart, the scheduler should begin with the least-recently executed asset (LRU) even if it's not has been executed yet.'.
+    """
+    configs = [
+        PredictionConfig(PredictionParams("BTC", 1 * DAY, [5 * MINUTE]), 1 * HOUR, True, 1),
+        PredictionConfig(PredictionParams("ETH", 1 * DAY, [5 * MINUTE]), 1 * HOUR, True, 1),
+        PredictionConfig(PredictionParams("XAUT", 1 * DAY, [5 * MINUTE]), 1 * HOUR, True, 1),
+    ]
+
+    scheduler = GroupScheduler.create_group_schedulers(configs)[0]
+    now = datetime.now(timezone.utc)
+
+    last_exec = [
+        (configs[0].prediction_params, now - timedelta(minutes=20)),  # BTC
+    ]
+
+    scheduler.set_last_executions(last_exec)
+
+    now = datetime.now(timezone.utc)
+    params = scheduler.next(now)
+    assert params is not None
+    assert params.asset == "ETH"
+
+    assert scheduler.index == 2
+    assert scheduler.next_run == now
+
+    params = scheduler.next(now)
+    assert params is not None
+    assert params.asset == "XAUT"
+
+    assert scheduler.index == 0
+    assert scheduler.next_run == now + timedelta(minutes=20)
+
 
 
 def test_group_scheduler_recover_picks_lru_first():
