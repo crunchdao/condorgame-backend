@@ -80,6 +80,33 @@ services:
         condition: service_completed_successfully
     networks: [ condornet ]
 
+  notebook:
+    <<: *common-build
+    container_name: condor-notebook
+    environment:
+      <<: *common-db-env
+    command: >
+      bash -c "
+      pip install --quiet notebook ipykernel &&
+      jupyter notebook
+      --ip=0.0.0.0
+      --port=8888
+      --no-browser
+      --allow-root
+      --NotebookApp.token=''
+      --NotebookApp.password=''
+      "
+    volumes:
+      - ${PROJECT_DIR:-./}:/app
+    working_dir: /app
+    ports:
+      - "8888:8888"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [ condornet ]
+
+
   # required only for production environment
   webto3:
     container_name: webto3

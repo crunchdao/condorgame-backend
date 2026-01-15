@@ -16,6 +16,9 @@ RUN uv sync
 ENV VIRTUAL_ENV=/app/.venv
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
+RUN pip install --upgrade pip
+RUN pip install .
+
 # Copy the application code
 COPY condorgame_backend ./condorgame_backend
 
