@@ -35,6 +35,12 @@ def default_prediction_config():
 
         PredictionConfig(PredictionParams('SOL', HORIZON2, STEPS_H2), PREDICTION_INTERVAL_H2, True, 7),
         PredictionConfig(PredictionParams('SOL', HORIZON1, STEPS_H1), PREDICTION_INTERVAL_H1, True, 8),
+
+        PredictionConfig(PredictionParams('SPYX', HORIZON2, STEPS_H2), PREDICTION_INTERVAL_H2, True, 9),
+        PredictionConfig(PredictionParams('NVDAX', HORIZON2, STEPS_H2), PREDICTION_INTERVAL_H2, True, 10),
+        PredictionConfig(PredictionParams('TSLAX', HORIZON2, STEPS_H2), PREDICTION_INTERVAL_H2, True, 11),
+        PredictionConfig(PredictionParams('AAPLX', HORIZON2, STEPS_H2), PREDICTION_INTERVAL_H2, True, 12),
+        PredictionConfig(PredictionParams('GOOGLX', HORIZON2, STEPS_H2), PREDICTION_INTERVAL_H2, True, 13),
     ]
 
 

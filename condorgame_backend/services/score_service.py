@@ -26,26 +26,48 @@ from condorgame_backend.utils.times import MINUTE
 __spec__: Optional[ModuleSpec]
 
 # ------------------------------------------------------------------
-# CRPS integration bounds configuration
+# CRPS configuration
 #
-# crps_bounds["t"][asset] defines the BASE integration half-width
-# used when computing the CRPS integral:
+# CRPS is computed as:
 #
-#     CRPS = ∫ (F(z) - 1[z ≥ x])² dz ,  z ∈ [t_min, t_max]
+#     CRPS = ∫ (F(z) − 1[z ≥ x])² dz ,  z ∈ [t_min, t_max]
 #
-# This value represents a reference maximum price-move scale for the
-# asset at the given horizon. It is a truncation range ensuring
-# enough mass is covered for meaningful CRPS evaluation.
+# where F(z) is the forecast CDF and x is the realized return.
+#
+# - `base_step` (seconds) defines the reference forecast resolution.
+#   CRPS integration bounds are scaled relative to this step so that
+#   scores remain comparable across different temporal resolutions.
+#
+# - `t[asset]` specifies the base half-width of the CRPS integration
+#   range for each asset at the reference resolution. This value
+#   represents a typical maximum price move to cover most of the
+#   predictive mass while keeping integration finite and stable.
+#
+# - `num_points` is the number of discretization points used to 
+#   numerically approximate the CRPS integral. Higher values improve 
+#   accuracy but increase computation time.
+#
+# For steps larger than `base_step`, integration bounds are expanded
+# by sqrt(step / base_step) to reflect increased uncertainty over
+# longer time intervals.
+#
+# Check `crps_integral` in tracker_evaluator.py for more information
 CRPS_BOUNDS = {
     "base_step": 300,
-    "t": {
+    "t":{
         "BTC": 1500,
         "SOL": 4,
         "ETH": 80,
         "XAUT": 28,
-    }
-}
 
+        "SPYX": 2.4,
+        "NVDAX": 2.3,
+        "TSLAX": 5.4,
+        "AAPLX": 1.7,
+        "GOOGLX": 2.3,
+    },
+    "num_points": 256
+}
 # ------------------------------------------------------------------
 # NumPy 2.0 removed np.trapz → replaced by np.trapezoid
 if hasattr(np, "trapezoid"):
@@ -54,7 +76,7 @@ else:
     trapezoid = np.trapz
 
 
-def crps_integral(density_dict, x, t_min=-4000, t_max=4000, num_points=256):
+def crps_integral(density_dict, x, t_min=-4000, t_max=4000, num_points=CRPS_BOUNDS["num_points"]):
     """
     CRPS score (Integrated Quadratic Score) using:
     - single PDF evaluation per grid point
