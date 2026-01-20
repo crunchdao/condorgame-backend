@@ -8,7 +8,7 @@ from condorgame_backend.services.interfaces.price_repository import PriceReposit
 
 class CrunchdaoPricesHttpRepository(PriceRepository):
 
-    def __init__(self, url="https://api--pricedb--tournament.crunchdao.cloud/v1/prices", retries=10, backoff=5):
+    def __init__(self, url="https://pricedb.crunchdao.com/v1/prices", retries=10, backoff=5):
         self.url = url
         self.retries = retries
         self.backoff = backoff
