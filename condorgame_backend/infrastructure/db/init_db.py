@@ -1,5 +1,6 @@
 from sqlmodel import SQLModel, create_engine, Session
 
+from condorgame_backend.utils.times import HOUR, DAY, MINUTE
 from . import DbPredictionRepository
 from .db_tables import ModelRow, LeaderboardRow, PredictionRow, PredictionConfigRow
 from ...entities.prediction import PredictionConfig, PredictionParams
@@ -11,24 +12,35 @@ DATABASE_URL = f"postgresql+psycopg2://{os.getenv('POSTGRES_USER')}:{os.getenv('
 
 engine = create_engine(DATABASE_URL)
 
-HOUR = 60 * 60
-MINUTE = 60
-DAY = 24 * HOUR
+HORIZON1 = 1 * HOUR
+HORIZON2 = 1 * DAY
+
+STEPS_H1 = (1 * MINUTE, 5 * MINUTE, 15 * MINUTE, 30 * MINUTE, 1 * HOUR)
+STEPS_H2 = (5 * MINUTE, 1 * HOUR, 6 * HOUR, 24 * HOUR)
+
+PREDICTION_INTERVAL_H1 = 12 * MINUTE
+PREDICTION_INTERVAL_H2 = 1 * HOUR
 
 
 def default_prediction_config():
     return [
-        PredictionConfig(PredictionParams('BTC', 1 * DAY, 5 * MINUTE), 1 * HOUR, True, 1),
-        PredictionConfig(PredictionParams('BTC', 1 * HOUR, 1 * MINUTE), 12 * MINUTE, True, 2),
+        PredictionConfig(PredictionParams('BTC', HORIZON2, STEPS_H2), PREDICTION_INTERVAL_H2, True, 1),
+        PredictionConfig(PredictionParams('BTC', HORIZON1, STEPS_H1), PREDICTION_INTERVAL_H1, True, 2),
 
-        PredictionConfig(PredictionParams('ETH', 1 * DAY, 5 * MINUTE), 1 * HOUR, True, 3),
-        PredictionConfig(PredictionParams('ETH', 1 * HOUR, 1 * MINUTE), 12 * MINUTE, True, 4),
+        PredictionConfig(PredictionParams('ETH', HORIZON2, STEPS_H2), PREDICTION_INTERVAL_H2, True, 3),
+        PredictionConfig(PredictionParams('ETH', HORIZON1, STEPS_H1), PREDICTION_INTERVAL_H1, True, 4),
 
-        PredictionConfig(PredictionParams('XAU', 1 * DAY, 5 * MINUTE), 1 * HOUR, True, 5),
-        PredictionConfig(PredictionParams('XAU', 1 * HOUR, 1 * MINUTE), 12 * MINUTE, True, 6),
+        PredictionConfig(PredictionParams('XAUT', HORIZON2, STEPS_H2), PREDICTION_INTERVAL_H2, True, 5),
+        PredictionConfig(PredictionParams('XAUT', HORIZON1, STEPS_H1), PREDICTION_INTERVAL_H1, True, 6),
 
-        PredictionConfig(PredictionParams('SOL', 1 * DAY, 5 * MINUTE), 1 * HOUR, True, 7),
-        PredictionConfig(PredictionParams('SOL', 1 * HOUR, 1 * MINUTE), 12 * MINUTE, True, 8),
+        PredictionConfig(PredictionParams('SOL', HORIZON2, STEPS_H2), PREDICTION_INTERVAL_H2, True, 7),
+        PredictionConfig(PredictionParams('SOL', HORIZON1, STEPS_H1), PREDICTION_INTERVAL_H1, True, 8),
+
+        PredictionConfig(PredictionParams('SPYX', HORIZON2, STEPS_H2), PREDICTION_INTERVAL_H2, True, 9),
+        PredictionConfig(PredictionParams('NVDAX', HORIZON2, STEPS_H2), PREDICTION_INTERVAL_H2, True, 10),
+        PredictionConfig(PredictionParams('TSLAX', HORIZON2, STEPS_H2), PREDICTION_INTERVAL_H2, True, 11),
+        PredictionConfig(PredictionParams('AAPLX', HORIZON2, STEPS_H2), PREDICTION_INTERVAL_H2, True, 12),
+        PredictionConfig(PredictionParams('GOOGLX', HORIZON2, STEPS_H2), PREDICTION_INTERVAL_H2, True, 13),
     ]
 
 

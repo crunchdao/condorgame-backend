@@ -2,7 +2,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Iterable, Dict, List, Optional
 
-from sqlmodel import Session, select, delete, text
+from sqlmodel import Session, select, delete, text, func
 
 from condorgame_backend.entities.model import ModelScore
 from condorgame_backend.entities.prediction import Prediction, PredictionConfig, PredictionParams, PredictionScore, PredictionStatus
@@ -28,7 +28,7 @@ class DbPredictionRepository(PredictionRepository):
             params=PredictionParams(
                 asset=row.asset,
                 horizon=row.horizon,
-                step=row.step
+                steps=row.steps
             ),
             status=PredictionStatus(row.status),
             exec_time=row.exec_time,
@@ -36,11 +36,12 @@ class DbPredictionRepository(PredictionRepository):
             performed_at=row.performed_at,
             resolvable_at=row.resolvable_at,
             score=PredictionScore(
-                value=row.score_value,
+                raw=row.score_raw_value,
+                final=row.score_final_value,
                 success=row.score_success,
                 failed_reason=row.score_failed_reason,
                 scored_at=row.score_scored_at
-            ) if row.score_value else None,
+            ) if row.score_raw_value else None,
         )
 
         self._attach_meta(prediction, row)
@@ -56,21 +57,21 @@ class DbPredictionRepository(PredictionRepository):
                 model_id,
                 asset,
                 horizon,
-                step,
+                steps,
                 COUNT(*) AS count,
                 MIN(resolvable_at) AS first_resolvable_date,
-                AVG(score_value) FILTER (
+                AVG(score_final_value) FILTER (
                     WHERE resolvable_at >= NOW() - INTERVAL '1 second' * :recent_seconds
                 ) AS mean_recent,
-                AVG(score_value) FILTER (
+                AVG(score_final_value) FILTER (
                     WHERE resolvable_at >= NOW() - INTERVAL '1 second' * :steady_seconds
                 ) AS mean_steady,
-                AVG(score_value) FILTER (
+                AVG(score_final_value) FILTER (
                     WHERE resolvable_at >= NOW() - INTERVAL '1 second' * :anchor_seconds
                 ) AS mean_anchor
             FROM predictions
-            WHERE resolvable_at >= NOW() - INTERVAL '1 second' * :anchor_seconds and score_scored_at is not null
-            GROUP BY model_id, asset, horizon, step;
+            WHERE resolvable_at >= NOW() - INTERVAL '1 second' * :min_resolvable_date and score_scored_at is not null
+            GROUP BY model_id, asset, horizon, steps;
         """)
 
         rows = self._session.execute(
@@ -79,6 +80,9 @@ class DbPredictionRepository(PredictionRepository):
                 "recent_seconds": ModelScore.WINDOW_RECENT.total_seconds(),
                 "steady_seconds": ModelScore.WINDOW_STEADY.total_seconds(),
                 "anchor_seconds": ModelScore.WINDOW_ANCHOR.total_seconds(),
+                # Used for performance purposes. We don't need to go much later than the rollover WINDOW_ANCHOR.
+                # To account for possible overlaps, a 1-day buffer is added for additional security.
+                "min_resolvable_date": (ModelScore.WINDOW_ANCHOR + timedelta(days=1)).total_seconds(),
             }
         )  # type: ignore
 
@@ -92,7 +96,7 @@ class DbPredictionRepository(PredictionRepository):
                     model_id=r.model_id,
                     asset=r.asset,
                     horizon=r.horizon,
-                    step=r.step,
+                    steps=r.steps,
                     count=r.count,
                     recent_mean=r.mean_recent if first_resolvable <= (now - ModelScore.WINDOW_RECENT) else None,
                     steady_mean=r.mean_steady if first_resolvable <= (now - ModelScore.WINDOW_STEADY) else None,
@@ -108,13 +112,14 @@ class DbPredictionRepository(PredictionRepository):
             model_id=p.model_id,
             asset=p.params.asset,
             horizon=p.params.horizon,
-            step=p.params.step,
+            steps=p.params.steps,
             status=p.status.value,
             exec_time=p.exec_time,
-            distributions=p.distributions,  # list[dict] → JSONB
+            distributions=p.distributions,  # dict → JSONB
             performed_at=p.performed_at,
             resolvable_at=p.resolvable_at,
-            score_value=p.score.value if p.score else None,
+            score_raw_value=p.score.raw if p.score else None,
+            score_final_value=p.score.final if p.score else None,
             score_success=p.score.success if p.score else None,
             score_failed_reason=p.score.failed_reason if p.score else None,
             score_scored_at=p.score.scored_at if p.score else None,
@@ -143,6 +148,7 @@ class DbPredictionRepository(PredictionRepository):
             .where(PredictionRow.resolvable_at.isnot(None))
             .where(PredictionRow.resolvable_at <= datetime.now(timezone.utc))  # Fix comparison operator
             .where(PredictionRow.score_scored_at.is_(None))
+            .order_by(PredictionRow.resolvable_at.asc())
         )
         rows = self._session.exec(stmt).all()
         return [self._row_to_domain(row) for row in rows]
@@ -196,8 +202,9 @@ class DbPredictionRepository(PredictionRepository):
                 PredictionRow.model_id,
                 PredictionRow.asset,
                 PredictionRow.horizon,
-                PredictionRow.step,
-                PredictionRow.score_value,
+                PredictionRow.steps,
+                PredictionRow.score_raw_value,
+                PredictionRow.score_final_value,
                 PredictionRow.score_success,
                 PredictionRow.score_failed_reason,
                 PredictionRow.score_scored_at,
@@ -232,7 +239,7 @@ class DbPredictionRepository(PredictionRepository):
                 prediction_params=PredictionParams(
                     asset=row.asset,
                     horizon=row.horizon,
-                    step=row.step
+                    steps=row.steps
                 ),
                 prediction_interval=row.prediction_interval,
                 active=row.active,
@@ -249,7 +256,7 @@ class DbPredictionRepository(PredictionRepository):
                 id=config.id,
                 asset=config.prediction_params.asset,
                 horizon=config.prediction_params.horizon,
-                step=config.prediction_params.step,
+                steps=config.prediction_params.steps,
                 prediction_interval=config.prediction_interval,
                 active=config.active,
                 order=config.order,
@@ -271,6 +278,29 @@ class DbPredictionRepository(PredictionRepository):
 
         if commit:
             self._session.commit()
+
+    def get_latest_prediction_params_execution_time(self) -> list[(PredictionParams, datetime)]:
+        stmt = (
+            select(
+                PredictionRow.asset,
+                PredictionRow.horizon,
+                PredictionRow.steps,
+                func.max(PredictionRow.performed_at).label("latest_execution_time")
+            )
+            .group_by(PredictionRow.asset, PredictionRow.horizon, PredictionRow.steps)
+            .order_by(PredictionRow.asset, PredictionRow.horizon, PredictionRow.steps)
+        )
+        rows = self._session.exec(stmt).all()
+
+        return [
+            (PredictionParams(
+                asset=row.asset,
+                horizon=row.horizon,
+                steps=row.steps
+            ), row.latest_execution_time.replace(tzinfo=timezone.utc)
+            )
+            for row in rows
+        ]
 
     def save_config(self, config: PredictionConfig) -> None:
         return self._save_config(config, commit=True)

@@ -44,8 +44,10 @@ class Model:
     player: Player
     name: str
     deployment_identifier: str
+    runner_id: str
     scores_by_param: list[ModelScoreByParam] = Field(default_factory=list)
     overall_score: ModelScore = None
+
 
     @staticmethod
     def create(model_runner: ModelRunner):
@@ -55,12 +57,17 @@ class Model:
         player_uid = model_runner.infos.get('cruncher_id')
         model_deployment_id = model_runner.deployment_id
 
-        return Model(
+        model = Model(
             crunch_identifier=model_id,
             player=Player(player_uid, player_name),
             name=model_name,
             deployment_identifier=model_deployment_id,
+            runner_id=model_runner.runner_id
         )
+
+        model.runner = model_runner
+
+        return model
 
     def update_runner_info(self, model_runner: ModelRunner):
         model_name = model_runner.model_name
@@ -70,6 +77,10 @@ class Model:
         self.name = model_name
         self.player.name = player_name
         self.deployment_identifier = model_deployment_id
+        self.runner_id = model_runner.runner_id
+
+    def runner_changed(self, model_runner: ModelRunner):
+        return self.runner_id != model_runner.runner_id
 
     def deployment_changed(self, model_runner: ModelRunner):
         return self.deployment_identifier != model_runner.deployment_id

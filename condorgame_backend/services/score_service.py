@@ -21,15 +21,92 @@ from condorgame_backend.services.interfaces.price_repository import PriceReposit
 from importlib.machinery import ModuleSpec
 from typing import Optional
 
+from condorgame_backend.utils.times import MINUTE
+
 __spec__: Optional[ModuleSpec]
 
-MINUTE = 60
+# ------------------------------------------------------------------
+# CRPS configuration
+#
+# CRPS is computed as:
+#
+#     CRPS = ∫ (F(z) − 1[z ≥ x])² dz ,  z ∈ [t_min, t_max]
+#
+# where F(z) is the forecast CDF and x is the realized return.
+#
+# - `base_step` (seconds) defines the reference forecast resolution.
+#   CRPS integration bounds are scaled relative to this step so that
+#   scores remain comparable across different temporal resolutions.
+#
+# - `t[asset]` specifies the base half-width of the CRPS integration
+#   range for each asset at the reference resolution. This value
+#   represents a typical maximum price move to cover most of the
+#   predictive mass while keeping integration finite and stable.
+#
+# - `num_points` is the number of discretization points used to 
+#   numerically approximate the CRPS integral. Higher values improve 
+#   accuracy but increase computation time.
+#
+# For steps larger than `base_step`, integration bounds are expanded
+# by sqrt(step / base_step) to reflect increased uncertainty over
+# longer time intervals.
+#
+# Check `crps_integral` in tracker_evaluator.py for more information
+CRPS_BOUNDS = {
+    "base_step": 300,
+    "t":{
+        "BTC": 1500,
+        "SOL": 4,
+        "ETH": 80,
+        "XAUT": 28,
+
+        "SPYX": 2.4,
+        "NVDAX": 2.3,
+        "TSLAX": 5.4,
+        "AAPLX": 1.7,
+        "GOOGLX": 2.3,
+    },
+    "num_points": 256
+}
+# ------------------------------------------------------------------
+# NumPy 2.0 removed np.trapz → replaced by np.trapezoid
+if hasattr(np, "trapezoid"):
+    trapezoid = np.trapezoid
+else:
+    trapezoid = np.trapz
+
+
+def crps_integral(density_dict, x, t_min=-4000, t_max=4000, num_points=CRPS_BOUNDS["num_points"]):
+    """
+    CRPS score (Integrated Quadratic Score) using:
+    - single PDF evaluation per grid point
+    - cumulative sum to get CDF
+
+    CRPS quantifies the accuracy of probabilistic forecasts by measuring the squared distance 
+    between the forecast CDF and the observed indicator function.
+    """
+    ts = np.linspace(t_min, t_max, num_points)
+    dt = ts[1] - ts[0]
+
+    # Vectorized PDF computation
+    pdfs = np.array([density_pdf(density_dict, t) for t in ts], dtype=float)
+
+    # Build CDF by cumulative integration
+    cdfs = np.cumsum(pdfs) * dt
+    cdfs = np.clip(cdfs, 0.0, 1.0)
+
+    # Indicator
+    indicators = (ts >= x).astype(float)
+
+    # Integrate squared error
+    integrand = (cdfs - indicators) ** 2
+    return float(trapezoid(integrand, ts))
 
 
 class ScoreService:
     PRICES_HISTORY_PERIOD = timedelta(days=7)  # Cache period for predictions
     PRICE_RESOLUTION = "minute"
-    SLEEP_TIMEOUT = 15 * MINUTE
+    SLEEP_TIMEOUT = 1 * MINUTE
 
     def __init__(self,
                  prices_repository: PriceRepository,
@@ -54,8 +131,6 @@ class ScoreService:
         self.logger = logging.getLogger(__spec__.name if __spec__ else __name__)
 
         self.asset_codes = PredictionConfig.get_active_assets(self.prediction_repository.fetch_active_configs())
-        self.models = self.model_repository.fetch_all()
-
         self.stop_event = asyncio.Event()
 
         self._init_prices_cache()
@@ -86,83 +161,158 @@ class ScoreService:
 
         return prices_updated
 
+    def _refresh_models(self):
+        self.models = self.model_repository.fetch_all()
+
     def score_predictions(self) -> bool:
         """
         Loop over cached predictions and score them using the `density_pdf` function.
         """
         self.logger.info("Scoring predictions.")
-        scored_count = 0
-        score_failed_count = 0
         predictions = self.prediction_repository.fetch_ready_to_score()
         if len(predictions) == 0:
             self.logger.info("No predictions to score.")
             return False
 
-        min_score = 0.0
-        for prediction in predictions:
-            score = self.score_prediction(prediction)
-            prediction.score = score
-
-            if score.success:
-                min_score = min(min_score, score.value)
-            else:
-                score_failed_count += 1
-
-            scored_count += 1
-
-        self.logger.info(f"Scored {scored_count} predictions, {score_failed_count} failed to score. Minimum score: {min_score}")
-
-        # if the prediction failed to score => we assign the minimum score
-        for prediction in predictions:
-            if not prediction.score.success:
-                prediction.score.value = min_score
+        self._score_predictions(predictions)
 
         self.prediction_repository.save_all(predictions)
 
-        self.logger.info(f"Scored {scored_count} predictions")
-
         return True
 
+    def _score_predictions(self, predictions: list[Prediction]):
+        grouped_predictions = {}
+        for prediction in predictions:
+            key = (prediction.params, prediction.performed_at)
+            grouped_predictions.setdefault(key, []).append(prediction)
+
+        for group_key, group_predictions in grouped_predictions.items():
+            group_failed = 0
+
+            # 1) compute raw scores
+            raw_scores = []
+            ok_predictions = []
+
+            for prediction in group_predictions:
+                score = self.score_prediction(prediction)  # lower the score is better it is
+                prediction.score = score
+
+                if score.success:
+                    raw_scores.append(float(score.raw))
+                    ok_predictions.append(prediction)
+                else:
+                    group_failed += 1
+
+            # 2) apply 95th percentile cap + normalize
+            if raw_scores:
+                scores = np.asarray(raw_scores, dtype=float)
+
+                # 95th percentile cap
+                worst_score = float(np.percentile(scores, 95))
+                best_score = float(np.min(scores))
+
+                # cap worst 95%
+                scores_capped = np.minimum(scores, worst_score)
+
+                # normalize by dispersion (guard against division by zero)
+                denom = worst_score - best_score  # 0.2
+                if denom == 0:
+                    # all successful scores identical -> give them all the best normalized score
+                    scores_norm = np.ones_like(scores_capped)
+                else:
+                    scores_norm = 1 - ((scores_capped - best_score) / denom)
+
+                scores_norm = np.clip(scores_norm, 0.0, 1.0)
+
+                # write normalized scores back (success predictions)
+                for pred, norm_value in zip(ok_predictions, scores_norm):
+                    pred.score.final = float(norm_value)
+                    pred.score.success = True
+
+                # failed predictions => assign worst normalized score
+                for pred in group_predictions:
+                    if not pred.score.success:
+                        pred.score.final = 0.0
+
+                self.logger.info(
+                    f"Scored {len(group_predictions)} predictions in group, {group_failed} failed to score. "
+                    f"Params: [{group_key[0]}], Performed_at: [{group_key[1]}], "
+                    f"best_raw: {best_score}, worst_raw_p95: {worst_score}"
+                )
+
+            else:
+                # no successful scores in this group -> everything becomes worst (0.0)
+                for pred in group_predictions:
+                    pred.score.raw = 0.0
+                    pred.score.final = 0.0
+
+                self.logger.info(
+                    f"Scored {len(group_predictions)} predictions in group, {group_failed} failed to score. "
+                    f"Params: [{group_key[0]}], Performed_at: [{group_key[1]}], "
+                    f"no successful scores -> all normalized to 0.0"
+                )
+
     def score_prediction(self, prediction: Prediction):
-        densities = []
-        step = prediction.params.step
+        total_score = 0.0
+        # step = prediction.params.step
         ts = prediction.resolvable_at.timestamp()
         asset = prediction.params.asset
 
         if prediction.status != PredictionStatus.SUCCESS:
             return PredictionScore(None, False, f"The prediction not succeed {prediction.status}")
 
-        if len(prediction.distributions) != prediction.params.horizon / step:
-            return PredictionScore(None, False, "The prediction does not have the correct number of steps")
         try:
-            for density_prediction in prediction.distributions[::-1]:
-                current_price_data = self.prices_cache.get_closest_price(asset, ts)
-                previous_price_data = self.prices_cache.get_closest_price(asset, ts - step)
+            # Score predictions at each temporal resolution independently
+            for step in prediction.params.steps:
+                density_prediction = prediction.distributions[str(step)]
 
-                if not current_price_data or not previous_price_data:
-                    self.logger.warning(f"No price data found for {asset} at {ts} or {ts - step}. Skipping density scoring.")
-                    continue
+                # Get timestamp of the first prediction step
+                ts_rolling = ts - step * (len(density_prediction) - 1)
 
-                ts_current, price_current = current_price_data
-                ts_prev, price_prev = previous_price_data
+                scores_step = []
 
-                if ts_current != ts_prev:
-                    delta_price = np.log(price_current) - np.log(price_prev)
-                    pdf_value = density_pdf(density_dict=density_prediction, x=delta_price)
-                    densities.append(pdf_value)
+                for i in range(len(density_prediction)):
 
-                ts -= step
+                    current_price_data = self.prices_cache.get_closest_price(asset, ts_rolling)
+                    previous_price_data = self.prices_cache.get_closest_price(asset, ts_rolling - step)
+
+                    ts_rolling += step
+
+                    if not current_price_data or not previous_price_data:
+                        self.logger.warning(f"No price data found for {asset} at {ts} or {ts - step}. Skipping density scoring.")
+                        continue
+
+                    ts_current, price_current = current_price_data
+                    ts_prev, price_prev = previous_price_data
+
+                    if ts_current != ts_prev:
+                        delta = (price_current - price_prev)
+
+                        # Step-dependent scaling coefficient for CRPS bounds
+                        K = np.sqrt(step / CRPS_BOUNDS["base_step"]) if step > CRPS_BOUNDS["base_step"] else 1
+
+                        crps_value = crps_integral(
+                            density_dict=density_prediction[i],
+                            x=delta,
+                            t_min=-K * CRPS_BOUNDS["t"][asset],
+                            t_max=K * CRPS_BOUNDS["t"][asset],
+                        )
+                        scores_step.append(crps_value)
+
+                total_score += np.sum(scores_step)
+
+            # Normalize by asset-specific scale (keep scores comparable across asset)
+            total_score = total_score / CRPS_BOUNDS["t"][asset]
+
         except Exception as e:
             tb = traceback.format_exc()
             self.logger.debug(f"Error during scoring: {e}\nTraceback:\n{tb}")
             return PredictionScore(None, False, f"Error during scoring: {e}\nTraceback:\n{tb}")
 
-        score = numpy.mean(densities)
-
-        if not math.isfinite(score):
+        if not math.isfinite(total_score):
             return PredictionScore(None, False, "The final score is invalid => math.isfinite return True.")
 
-        return PredictionScore(float(score), True, None)
+        return PredictionScore(float(total_score), True, None)
 
     def score_models(self):
 
@@ -180,7 +330,7 @@ class ScoreService:
 
                 self.logger.error(f"Model {score.model_id} not found in the model repository")
 
-            model.update_score(PredictionParams(score.asset, score.horizon, score.step),
+            model.update_score(PredictionParams(score.asset, score.horizon, score.steps),
                                ModelScore(score.recent_mean, score.steady_mean, score.anchor_mean))
 
         models = self.models.values()
@@ -238,6 +388,9 @@ class ScoreService:
     async def _run(self):
         force_scoring = True
         while not self.stop_event.is_set():
+            now = datetime.now(timezone.utc)
+            # Fetch updated models to ensure the leaderboard contains new models joined since the last execution
+            self._refresh_models()
             self._update_prices()
 
             if self.score_predictions() or force_scoring:
@@ -246,8 +399,10 @@ class ScoreService:
 
                 self.prediction_repository.prune()
             try:
-                self.logger.debug("Sleeping for %d seconds", self.SLEEP_TIMEOUT)
-                await asyncio.wait_for(self.stop_event.wait(), timeout=self.SLEEP_TIMEOUT)
+                end_time = datetime.now(timezone.utc)
+                sleep_duration = max(self.SLEEP_TIMEOUT - (end_time - now).total_seconds(), 0)
+                self.logger.debug("Sleeping for %d seconds", sleep_duration)
+                await asyncio.wait_for(self.stop_event.wait(), timeout=sleep_duration)
             except asyncio.TimeoutError:
                 pass
 
