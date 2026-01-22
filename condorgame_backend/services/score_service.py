@@ -208,7 +208,15 @@ class ScoreService:
                 scores = np.asarray(raw_scores, dtype=float)
 
                 # 95th percentile cap
-                worst_score = float(np.percentile(scores, 95))
+                # worst_score = float(np.percentile(scores, 95))
+                percentile_cap = float(np.percentile(scores, 95, method="closest_observation"))
+                # take the observation before percentile_cap as the worst score
+                lower = scores[scores < percentile_cap]
+                if lower.size > 0:
+                    worst_score = float(lower.max())
+                else:
+                    # all values equal OR percentile_cap is the minimum
+                    worst_score = percentile_cap
                 best_score = float(np.min(scores))
 
                 # cap worst 95%
