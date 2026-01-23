@@ -245,11 +245,11 @@ class PredictService:
         # )
 
         self.model_concurrent_runner = DynamicSubclassModelConcurrentRunner(
-            self.MODEL_RUNNER_TIMEOUT,
-            "condorgame",
-            self.MODEL_RUNNER_NODE_HOST,
-            self.MODEL_RUNNER_NODE_PORT,
-            "condorgame.tracker.TrackerBase",
+            host=self.MODEL_RUNNER_NODE_HOST,
+            port=self.MODEL_RUNNER_NODE_PORT,
+            crunch_id="condorgame",
+            base_classname="condorgame.tracker.TrackerBase",
+            timeout=self.MODEL_RUNNER_TIMEOUT,
             max_consecutive_failures=100,
             max_consecutive_timeouts=100,
             # secure_credentials=secure_credentials,
