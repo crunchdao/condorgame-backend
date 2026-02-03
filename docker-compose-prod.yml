@@ -64,9 +64,6 @@ services:
     volumes:
       - /:/host:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    configs:
-      - source: newrelic-logging
-        target: /etc/newrelic-infra/logging.d/logging.yml
 
   db-backup:
     image: tiredofit/db-backup:latest
