@@ -267,7 +267,7 @@ class ScoreService:
         asset = prediction.params.asset
 
         if prediction.status != PredictionStatus.SUCCESS:
-            return PredictionScore(None, False, f"The prediction not succeed {prediction.status}")
+            return PredictionScore(None, False, f"Prediction failed: {prediction.status.name.lower()}")
 
         try:
             # Score predictions at each temporal resolution independently
@@ -315,10 +315,10 @@ class ScoreService:
         except Exception as e:
             tb = traceback.format_exc()
             self.logger.debug(f"Error during scoring: {e}\nTraceback:\n{tb}")
-            return PredictionScore(None, False, f"Error during scoring: {e}\nTraceback:\n{tb}")
+            return PredictionScore(None, False, "Scoring error: invalid prediction format or unsupported distribution")
 
         if not math.isfinite(total_score):
-            return PredictionScore(None, False, "The final score is invalid => math.isfinite return True.")
+            return PredictionScore(None, False, "The final score is invalid => math.isfinite return False.")
 
         return PredictionScore(float(total_score), True, None)
 
