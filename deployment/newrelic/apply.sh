@@ -1,13 +1,12 @@
 #!/bin/sh
-set -e
 
 if [ -z "$TF_VAR_newrelic_account_id" ]; then
   echo "Skipping NewRelic alerts (NEW_RELIC_ACCOUNT_ID not set)"
   exit 0
 fi
 
-terraform init -upgrade -input=false
-terraform plan -detailed-exitcode -out=tfplan 2>/dev/null
+terraform init -upgrade -input=false || exit 1
+terraform plan -detailed-exitcode -out=tfplan
 PLAN_EXIT_CODE=$?
 
 if [ $PLAN_EXIT_CODE -eq 0 ]; then

@@ -207,7 +207,7 @@ resource "newrelic_notification_channel" "slack_channel" {
     key   = "payload"
     value = jsonencode({
       channel = var.slack_channel
-      text    = "🚨 *$${var.project_name} Alert*"
+      text    = "🚨 *${var.project_name} Alert*"
       attachments = [
         {
           color = "danger"

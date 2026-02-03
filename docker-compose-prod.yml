@@ -44,7 +44,7 @@ services:
       TF_VAR_slack_webhook_url: ${NEW_RELIC_SLACK_WEBHOOK_URL:-}
       TF_VAR_slack_channel: ${NEW_RELIC_SLACK_CHANNEL:-#alerts}
       TF_VAR_infra_host_name: ${COMPOSE_PROJECT_NAME}-host
-    entrypoint: ["/bin/sh", "/workspace/apply.sh"]
+    entrypoint: [ "/bin/sh", "/workspace/apply.sh" ]
 
   # NewRelic Infrastructure Agent - monitors host metrics, containers, and forwards logs
   newrelic-infra:
@@ -54,6 +54,7 @@ services:
     privileged: true
     pid: host
     network_mode: host
+    cgroup: host
     cap_add:
       - SYS_PTRACE
     environment:
@@ -91,12 +92,3 @@ services:
       - DB01_S3_KEY_SECRET=${AWS_SECRET_ACCESS_KEY:?error}
 
     networks: [ condornet ]
-
-configs:
-  newrelic-logging:
-    content: |
-      logs:
-        - name: condorgame-containers
-          docker:
-            match:
-              name: "${COMPOSE_PROJECT_NAME}*"
